@@ -19,12 +19,15 @@ library(rpart.plot)
 library(caret)
 library(kableExtra)
 library(compareGroups)
+library(googlesheets4)
+
 ```
 
 ```{r Tema 7, warning=FALSE, include=FALSE}
   #remove cols
-
-df_desc <- read_excel("DM_13.08.2023 (1).xlsx")
+googlesheets4::gs4_deauth()
+df_desc <- read_sheet("https://docs.google.com/spreadsheets/d/1MF5z4SF0R6qGiZnuyWwb2W9dACdN_Bmzx0SIi-oLPjw/edit?usp=sharing", sheet = 1)
+#df_desc <- read_excel("DM_13.08.2023 (1).xlsx")
 df_desc <- df_desc %>%
   select(-1,-2,-23,-24,-26)
 
