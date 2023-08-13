@@ -1,1 +1,559 @@
+---
+title: "prjoect"
+output: html_document
+date: "2023-08-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, fig.width=11,fig.height=8}
+  #remove cols
+library(readxl)
+library(dplyr)
+library(survival)
+library(survminer)
+library(finalfit)
+library(tidyverse)
+library(psych)
+library(survminer)
+library(forestplot)
+library(gtsummary)
+library(dynpred)
+df_desc <- read_excel("C:/Users/user/Downloads/DM2.xlsx")
+df_desc <- df_desc %>%
+  select(-1,-2,-23,-24,-26)
+
+#rename vars
+df_desc <- df_desc %>% 
+  rename(aGVHD = `('Was GVHD diagnosis established?', 'Acute GVHD')`,
+                    cGvHD = `('Was GVHD diagnosis established?', 'Chronic GVHD')`,
+        aGVHD_date = `('GVHD diagnosis date', 'Acute GVHD')`,
+        cGVHD_date = `('GVHD diagnosis date', 'Chronic GVHD')`, 
+         aGVHD_grade = `Grade of acute GVHD`, 
+         cGVHD_grade = `Grade of chronic GVHD`,  
+         Dg = `Main Diagnosis`)
+#add id var
+df_desc <- rowid_to_column(df_desc, "id")
+
+#change HH in cgvhd dates
+df_desc[124, "cGVHD_date"] <- "15/09/2021"
+df_desc[299, "cGVHD_date"] <- "15/07/2021"
+df_desc[301, "cGVHD_date"] <- "15/06/2021"
+#transform dates
+df_desc <- df_desc %>%
+  mutate(Birth = dmy(Birth),
+         LCDTC = dmy(LCDTC),
+         DEATHDTC = dmy(DEATHDTC),
+         RELAPDTC = dmy(RELAPDTC),
+         TRDTC = dmy(TRDTC),
+         aGVHD_date = dmy(aGVHD_date),
+         cGVHD_date = dmy(cGVHD_date)
+         )
+#calculate dates
+df_desc <- df_desc %>%
+  mutate(
+FU_time = as.double(difftime(LCDTC, TRDTC)),
+Death_time = as.double(difftime(DEATHDTC, TRDTC)),
+Age_tr = (as.double(difftime( TRDTC, Birth, units = "days")))/365.25,
+Relapse_time = as.double(difftime(RELAPDTC, TRDTC)),
+aGVHD_time = as.double(difftime(aGVHD_date,TRDTC)),
+cGVHD_time = as.double(difftime(cGVHD_date, TRDTC))
+)
+
+#remove date vars
+df_desc <- df_desc %>%
+  select(-Birth, - LCDTC, -DEATHDTC, - RELAPDTC, - TRDTC, - aGVHD_date, -cGVHD_date)
+df_desc <- df_desc %>%
+mutate (FU_time = ifelse(is.na(FU_time), Death_time, FU_time))
+
+#Relapse
+df_desc <- df_desc %>%
+  mutate(compet_relapse = ifelse(RELAPYN == "no" | RELAPYN == "unknown", FU_time, Relapse_time),
+         status_rel = ifelse(RELAPYN == "no" | RELAPYN == "unknown", PTSTAT, RELAPYN)
+         )
+#recode relapse
+df_desc <- df_desc %>%
+  mutate(status_rel = case_when(status_rel == "alive" ~ 0, 
+                                status_rel == "died" ~ 1, 
+                                status_rel == "yes" ~ 2))
+#recode TR type
+df_desc <- df_desc %>%
+  mutate(TRTYPE = ifelse(TRTYPE == 2, 5, TRTYPE))
+#Transform PTSTAT to numeric
+df_desc <- df_desc %>%
+  mutate(PTSTAT = ifelse(PTSTAT == "alive", 0, 1))
+
+#recode cgvhd grade
+df_desc <- df_desc %>%
+  mutate(cGVHD_grade = ifelse(is.na(cGVHD_grade) | cGVHD_grade == "mild", "None or mild", cGVHD_grade))
+
+# kaplan meyer
+km_overall <- survfit(Surv(FU_time, PTSTAT) ~ 1, data=df_desc)
+tbl_survfit(km_overall, times = c(1,100*(1:20)))
+
+Overall_plot <- ggsurvplot(
+   km_overall,                    # survfit object with calculated statistics.
+   title = "OS",
+   conf.int = TRUE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15,
+    # plot the number of censored subjects at time 
+)
+
+
+
+#create efs variable
+
+df_desc <- df_desc %>%
+  mutate(efs = ifelse(status_rel == 2, 1, status_rel))
+
+```
+
+## Общая выживаемость
+
+### Общая 
+```{r echo=FALSE, fig.width=11,fig.height=8}
+
+LMdata <- dynpred::cutLM(df_desc, outcome = list(time ="FU_time", status = "PTSTAT"), LM = 0, horizon = 365.25*2, covs = list(fixed = c("SITE", "Sex",  "TRNUM", "RELAPYN", "TRTYPE", "TRSOURCE", "CONDTYPE", "aGVHD", "cGvHD", "aGVHD_grade", "cGVHD_grade", "GVGD_proph", "aGVHD_grade", "cGVHD_grade", "Dg", "GVGD_proph" ), format ="wide"))
+
+#PLOT OS AT 2 years
+km_LM <- survfit(Surv(FU_time, PTSTAT == 1) ~ 1, data=LMdata)
+LM_plot <- ggsurvplot(
+   km_LM,                    # survfit object with calculated statistics.
+   title = "OS",
+   conf.int = TRUE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15
+    # plot the number of censored subjects at time 
+)
+
+#subset for AL
+ LMdataAL <- subset(LMdata, Dg == "Acute")
+ 
+ 
+```
+
+### По виду донора 
+```{r echo=FALSE, fig.width=11,fig.height=8}
+
+km_LM_donor <- survfit(Surv(FU_time, PTSTAT) ~ TRTYPE, data=LMdata)
+LM_plot_donor <- ggsurvplot(
+   km_LM_donor,                    # survfit object with calculated statistics.
+   title = "OS",
+   pval = TRUE, 
+   conf.int = FALSE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15,
+  surv.median.line = "hv"
+)
+
+ 
+```
+
+### По источнику трансплантата 
+```{r echo=FALSE, fig.width=11,fig.height=8}
+
+
+km_LM_source <- survfit(Surv(FU_time, PTSTAT) ~ TRSOURCE, data=LMdata)
+
+LM_plot_source <- ggsurvplot(
+   km_LM_source,                    # survfit object with calculated statistics.
+   title = "OS",
+   pval = TRUE, 
+   conf.int = FALSE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15,
+  surv.median.line = "hv")
+```
+
+### По режиму кондиционирования
+```{r echo=FALSE, fig.width=11,fig.height=8}
+
+km_LM_cond <- survfit(Surv(FU_time, PTSTAT) ~ CONDTYPE, data=LMdata)
+
+LM_plot_cond <- ggsurvplot(
+   km_LM_cond,                    # survfit object with calculated statistics.
+   title = "OS",
+   pval = TRUE, 
+   conf.int = FALSE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15,
+  surv.median.line = "hv")
+ 
+```
+## OS for AL
+
+### Overall
+```{r echo=FALSE, fig.width=11,fig.height=8}
+km_LM_AL <- survfit(Surv(FU_time, PTSTAT == 1) ~ 1, data=LMdataAL)
+LM_plot_AL <- ggsurvplot(km_LM_AL,                   
+   title = "OS",
+   conf.int = TRUE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15
+    # plot the number of censored subjects at time 
+)
+```
+
+### Donor type
+```{r echo=FALSE, fig.width=11,fig.height=8}
+km_LM_AL_donor <- survfit(Surv(FU_time, PTSTAT == 1) ~ TRTYPE, data=LMdataAL)
+LM_plot_AL_donor <- ggsurvplot(km_LM_AL_donor, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+                            # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+```
+### BMT source
+```{r echo=FALSE, fig.width=11,fig.height=8}
+km_LM_AL_source <- survfit(Surv(FU_time, PTSTAT == 1) ~ TRSOURCE, data=LMdataAL)
+LM_plot_AL_source <- ggsurvplot(km_LM_AL_source, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "OS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+```  
+
+### Conditioning
+```{r echo=FALSE, fig.width=11,fig.height=8}
+km_LM_AL_cond <- survfit(Surv(FU_time, PTSTAT == 1) ~ CONDTYPE, data=LMdataAL)
+LM_plot_AL_cond <- ggsurvplot(km_LM_AL_cond, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "OS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+```
+  
+  
+  
+## Event-Free survival
+
+### Overall EFS
+```{r echo=FALSE, fig.width=11,fig.height=8}
+# Event - relapse, death
+
+#Data for relapse status at 500
+LMdata_relapse <- dynpred::cutLM(df_desc, outcome = list(time ="compet_relapse", status = "efs"), LM = 0, horizon = 375.25*2, covs = list(fixed = c("SITE", "Sex",  "TRNUM", "TRTYPE", "TRSOURCE", "CONDTYPE", "aGVHD", "cGvHD", "aGVHD_grade", "cGVHD_grade", "GVGD_proph"), format ="wide"))
+
+
+
+km_LM_relapse <- survfit(Surv(compet_relapse, efs) ~ 1, data=LMdata_relapse)
+LM_plot_relapse <- ggsurvplot(km_LM_relapse, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "EFS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+```
+### EFS by donor
+```{r echo=FALSE, fig.width=11,fig.height=8}
+km_LM_relapse_donor <- survfit(Surv(compet_relapse, efs) ~ TRTYPE, data=LMdata_relapse)
+LM_plot_relapse_donor <- ggsurvplot(km_LM_relapse_donor, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "EFS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+```
+### BMT source
+```{r echo=FALSE, fig.width=11,fig.height=8}
+  km_LM_relapse_source <- survfit(Surv(compet_relapse, efs) ~ TRSOURCE, data=LMdata_relapse)
+LM_plot_relapse_source <- ggsurvplot(km_LM_relapse_source, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "EFS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+```
+### Conditioning
+```{r echo=FALSE, fig.width=11,fig.height=8}
+  km_LM_relapse_cond <- survfit(Surv(compet_relapse, efs) ~ CONDTYPE, data=LMdata_relapse)
+LM_plot_relapse_cond <- ggsurvplot(km_LM_relapse_cond, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "EFS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+```
+## Landmark for agvhd and cgvhd
+```{r echo=FALSE, fig.width=11,fig.height=8}
+#Landmark for agvhd OS
+LM_agvhd <- dynpred::cutLM(df_desc, outcome = list(time ="FU_time", status = "PTSTAT"), LM = 125, horizon = 365.25*2, covs = list(fixed = c("SITE", "Sex",  "TRNUM", "RELAPYN", "TRTYPE", "TRSOURCE", "CONDTYPE", "aGVHD_grade", "cGVHD_grade", "Dg", "GVGD_proph", "efs", "compet_relapse"), format ="wide"))
+LM_agvhd <- LM_agvhd %>%
+  mutate(aGVHD_grade = ifelse(is.na(aGVHD_grade) | aGVHD_grade == 1 | aGVHD_grade == 2, 0, 1))
+    #km for agvhd OS
+km_LM_agvhd <- survfit(Surv(FU_time, PTSTAT) ~ aGVHD_grade, data=LM_agvhd)
+LM_plot_agvhd <- ggsurvplot(km_LM_agvhd, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "OS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+LM_tbl_agvhd <- tbl_survfit(km_LM_agvhd, times = c(125,(365.25/2),365.25*(1:2))) %>%
+   gtsummary::add_n() %>%
+  gtsummary::add_nevent() %>%
+  add_p() %>%
+  as_flex_table()
+
+#km for agvhd efs
+LM_agvhd_efs <- dynpred::cutLM(df_desc, outcome = list(time ="compet_relapse", status = "efs"), LM = 125, horizon = 365.25*2, covs = list(fixed = c("SITE", "Sex",  "TRNUM", "RELAPYN", "TRTYPE", "TRSOURCE", "CONDTYPE", "aGVHD_grade", "cGVHD_grade", "Dg", "GVGD_proph"), format ="wide"))
+LM_agvhd_efs <- LM_agvhd_efs %>%
+  mutate(aGVHD_grade = ifelse(is.na(aGVHD_grade) | aGVHD_grade == 1 | aGVHD_grade == 2, 0, 1))
+km_LM_agvhd_efs <- survfit(Surv(compet_relapse, efs) ~ aGVHD_grade, data=LM_agvhd_efs)
+LM_tbl_agvhd_efs <- tbl_survfit(km_LM_agvhd_efs, times = c(125,(365.25/2),365.25*(1:2))) %>%
+   gtsummary::add_n() %>%
+  gtsummary::add_nevent() %>%
+  add_p() %>%
+  as_flex_table()
+
+LM_plot_agvhd_efs <- ggsurvplot(km_LM_agvhd_efs, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "EFS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+#km for cgvhd OS
+LM_cgvhd <- dynpred::cutLM(df_desc, outcome = list(time ="FU_time", status = "PTSTAT"), LM = 275, horizon = 365.25*2, covs = list(fixed = c("SITE", "Sex",  "TRNUM", "RELAPYN", "TRTYPE", "TRSOURCE", "CONDTYPE", "aGVHD_grade", "cGVHD_grade", "Dg", "GVGD_proph", "efs", "compet_relapse"), format ="wide"))
+
+    #km for cgvhd OS
+km_LM_cgvhd <- survfit(Surv(FU_time, PTSTAT) ~ cGVHD_grade, data=LM_cgvhd)
+LM_plot_cgvhd <- ggsurvplot(km_LM_cgvhd, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "OS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+LM_tbl_cgvhd <- tbl_survfit(km_LM_cgvhd, times = c(275,365.25*(1:2))) %>%
+   gtsummary::add_n() %>%
+  gtsummary::add_nevent() %>%
+  add_p() %>%
+  as_flex_table()
+
+#km for cgvhd EFS
+LM_cgvhd_efs <- dynpred::cutLM(df_desc, outcome = list(time ="compet_relapse", status = "efs"), LM = 275, horizon = 365.25*2, covs = list(fixed = c("SITE", "Sex",  "TRNUM", "RELAPYN", "TRTYPE", "TRSOURCE", "CONDTYPE", "aGVHD_grade", "cGVHD_grade", "Dg", "GVGD_proph", "efs", "compet_relapse"), format ="wide"))
+
+
+    #km for cgvhd EFS
+km_LM_cgvhd_efs <- survfit(Surv(compet_relapse, efs) ~ cGVHD_grade, data=LM_cgvhd_efs)
+LM_plot_cgvhd_efs <- ggsurvplot(km_LM_cgvhd_efs, 
+    pval = TRUE,                                   
+   conf.int = FALSE,         # show confidence intervals for 
+       title = "OS",                      # point estimaes of survival curves.
+   xlab = "Time in days",   # customize X axis label.
+   break.time.by = 100,     # break X axis in time intervals by 200.
+   risk.table = "absolute",  # absolute number and percentage at risk.
+  risk.table.height=.15)
+
+LM_tbl_cgvhd_efs <- tbl_survfit(km_LM_cgvhd_efs, times = c(275,365.25*(1:2))) %>%
+   gtsummary::add_n() %>%
+  gtsummary::add_nevent() %>%
+  add_p() %>%
+  as_flex_table()
+```
+
+## COX
+###Univariate cox OS, time dependent AGVHD
+```{r echo=FALSE, fig.width=11,fig.height=8}
+#recode aGVHD grade
+df_desc <- df_desc %>%
+  mutate(aGVHD_grade = ifelse(is.na(aGVHD_grade) | aGVHD_grade == 1 | aGVHD_grade == 2, 0, 1))
+
+#recode vars
+df_desc <- df_desc %>%
+  mutate(TRNUM = ifelse(TRNUM >=2, 2, 1))
+
+df_desc <- df_desc %>%
+  mutate(                        TRNUM = as.factor(TRNUM),
+                        TRTYPE = as.factor(TRTYPE),
+         TRSOURCE = as.factor(TRSOURCE),
+         CONDTYPE = as.factor(CONDTYPE),
+         aGVHD_grade = as.factor(aGVHD_grade))
+
+#univ
+explanatory = c("Sex", "Age_tr", "TRNUM", "TRTYPE", "TRSOURCE", "CONDTYPE", "Dg", "GVGD_proph")
+dependent = "Surv(FU_time, PTSTAT)"
+df_desc %>%
+  coxphuni(dependent, explanatory) %>%
+    fit2df -> uni_cox
+
+#Tmerge
+td_dat <- 
+  tmerge(
+    data1 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, FU_time, PTSTAT),
+    data2 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, FU_time, PTSTAT, aGVHD_grade, aGVHD_time),
+    id = id, 
+    death = event(FU_time, PTSTAT),
+    agvhd = tdc(aGVHD_time)
+    )
+#recode agvhd
+td_dat <- td_dat %>%
+  mutate(agvhd = as.factor(agvhd))
+
+#agvhd uni cox 
+coxph(Surv(tstart, tstop, death) ~ agvhd, data =td_dat) %>% fit2df -> agvhd_cox
+#all uni cox
+univ_cox <- rbind(uni_cox, agvhd_cox)
+```
+###multivariate cox OS, time dependent AGVHD
+```{r echo=FALSE, fig.width=11,fig.height=8}
+multi_os<-coxph(Surv(tstart, tstop, death) ~ agvhd + Sex + Age_tr + TRNUM + TRTYPE + TRSOURCE + CONDTYPE + Dg + GVGD_proph, data = td_dat, id = id)
+forest_multi_os<-ggforest(multi_os)
+#assumptions
+cox.zph(multi_os)
+```
+###multivariate and univariate cox OS, time dependent CGVHD
+```{r echo=FALSE, fig.width=11,fig.height=8}
+#Tmerge
+td_dat2 <- 
+  tmerge(
+    data1 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, FU_time, PTSTAT, aGVHD_grade),
+    data2 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, FU_time, PTSTAT, aGVHD_grade, cGvHD, cGVHD_time),
+    id = id, 
+    death = event(FU_time, PTSTAT),
+    cgvhd = tdc(cGVHD_time)
+    )
+
+#recode vars
+td_dat2 <- td_dat2 %>%
+  mutate(cgvhd = as.factor(cgvhd))
+
+#multi cox cgvhd
+multi_os2<-coxph(Surv(tstart, tstop, death) ~ cgvhd + aGVHD_grade + Sex + Age_tr + TRNUM + TRTYPE + TRSOURCE + CONDTYPE + Dg + GVGD_proph, data = td_dat2, id = id)
+forest_multi_os2<-ggforest(multi_os2)
+#assumptions
+cox.zph(multi_os2)
+```
+## EFS uni
+```{r echo=FALSE, fig.width=11,fig.height=8}
+#univ
+explanatory = c("Sex", "Age_tr", "TRNUM", "TRTYPE", "TRSOURCE", "CONDTYPE", "Dg", "GVGD_proph")
+dependent = "Surv(compet_relapse, efs)"
+df_desc %>%
+  coxphuni(dependent, explanatory) %>%
+    fit2df -> uni_cox_2
+
+#Tmerge
+td_dat_efs <- 
+  tmerge(
+    data1 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, compet_relapse, efs),
+    data2 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, compet_relapse, efs,aGVHD_time,aGVHD_grade),
+    id = id, 
+    death = event(compet_relapse, efs),
+    agvhd = tdc(aGVHD_time)
+    )
+
+#recode agvhd
+td_dat_efs <- td_dat_efs %>%
+  mutate(agvhd = as.factor(agvhd))
+
+#agvhd uni cox 
+coxph(Surv(tstart, tstop, death) ~ agvhd, data =td_dat_efs) %>% fit2df -> agvhd_cox_efs
+#all uni cox
+univ_cox_efs <- rbind(uni_cox_2, agvhd_cox_efs)
+```
+###multivariate cox efs, time dependent AGVHD
+```{r echo=FALSE, fig.width=11,fig.height=8}
+multi_efs<-coxph(Surv(tstart, tstop, death) ~ agvhd + Sex + Age_tr + TRNUM + TRTYPE + TRSOURCE + CONDTYPE + Dg + GVGD_proph, data = td_dat, id = id)
+forest_multi_efs<-ggforest(multi_efs)
+#assumptions
+cox.zph(multi_efs)
+```
+###multivariate and univariate cox EFS, time dependent CGVHD
+```{r echo=FALSE, fig.width=11,fig.height=8}
+#Tmerge
+td_dat_efs2 <- 
+  tmerge(
+    data1 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, compet_relapse, efs, aGVHD_grade),
+    data2 = df_desc %>% select(id, Sex, Age_tr, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, Dg, GVGD_proph, compet_relapse, efs, aGVHD_grade, cGvHD, cGVHD_time),
+    id = id, 
+    death = event(compet_relapse, efs),
+    cgvhd = tdc(cGVHD_time)
+    )
+
+#recode vars
+td_dat_efs2 <- td_dat_efs2 %>%
+  mutate(cgvhd = as.factor(cgvhd))
+
+#multi cox cgvhd
+multi_efs2<-coxph(Surv(tstart, tstop, death) ~ cgvhd + aGVHD_grade + Sex + Age_tr + TRNUM + TRTYPE + TRSOURCE + CONDTYPE + Dg + GVGD_proph, data = td_dat2, id = id)
+forest_multi_efs2<-ggforest(multi_efs2)
+#assumptions
+cox.zph(multi_efs2)
+```
+
+
+```{r echo=FALSE, fig.width=9,fig.height=7}
+forest_multi_os
+forest_multi_os2
+forest_multi_efs
+forest_multi_efs2
+
+LM_plot
+LM_plot_agvhd
+LM_tbl_agvhd
+LM_plot_agvhd_efs
+LM_plot_cgvhd
+LM_tbl_cgvhd
+LM_plot_cgvhd_efs
+LM_tbl_cgvhd_efs
+LM_plot_cond
+LM_plot_donor
+LM_plot_relapse
+LM_plot_relapse_cond
+LM_plot_relapse_donor
+LM_plot_relapse_source
+LM_plot_source
+
+```
+
 
