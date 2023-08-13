@@ -12,22 +12,39 @@ Graft versus host disease (GvHD) is a complication that might occur after an tra
 
 ## List of files:
 adagvhd.xlsx - collection of information regarding acute GvHD (collection from raw datasets together) 
+
 adcgvhd.xlsx - collection of information regarding chronic GvHD (collected from raw datasets in one place). 
+
 ADCM_A.xlsx - all information about acute GvHD therapy
+
 ADCM_C.xlsx - all information about chronic GvHD therapy
+
 ADCM_X.xlsx - all information about the therapy of 'cross' syndrome
+
 ADSL.xlsx - data collected from all raw datasets to optimize table construction (one row per patient)
+
 GVHD_FORM.xlsx - dataset containing all patients analyzed according to the protocol with available GvHD data
+
 type_THSCA(1).xlsx - file for cumulative event rate with donor type. 
+
 AGVHD_20230119_120304 - characteristics of acute GvHD
+
 CGVHD_20230119_120304 - characteristics of chronic GvHD
+
 CM_20230119_120304 - characteristics of treatment
+
 DM_20230119_120304 - demographic data
+
 GVHD_20230119_120304 - presence of aGvHD, supplemented by file view_THSC(1).xlsx 
+
 PREV_20230119_120304 - prevention of GvHD
+
 RS_20230119_120304 - refractoriness to steroid treatment.
+
 STAT_20230119_120304 - overall survival and recurrence rates
+
 TR_20230119_120304 - parameters of transplantation technology
+
 TU_20230119_120304 - main diagnosis (indication for transplantation)  
 
 ## Methods
@@ -35,7 +52,7 @@ TU_20230119_120304 - main diagnosis (indication for transplantation)
 1. Descriptive statistics
 2. Kaplan-Meier with and without landmark survival analysis and Cox ph-regression with time-dependent covariates, logit.
 3. Decision tree for GvHD grading.
-4. Gradient boosted survival analysis, random forest for survival analysis, basic ML-methods (logit, k-neighbor classifier etc) including stacking, hyper-parameter tuning with GridSearch.
+4. Gradient boosted survival analysis, random forest for survival analysis, basic ML-methods (logit, k-neighbors classifier etc) including stacking, hyper-parameter tuning with GridSearch.
 
 ## Key findings
 
