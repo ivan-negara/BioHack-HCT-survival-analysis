@@ -1,7 +1,7 @@
 # BioHack-HCT-survival-analysis
 ## Motivation.
 
-Graft versus host disease (GvHD) is a complication that might occur after an transplantation of bone marrow. GvHD is characerized with a high prevalence and noticable probability of death. That why the analysis of various factors impacting GvHD probability remains topical problem in modern oncohematology. In the current project we propose to analyse a unique dataset containing data about GvHD diagnosis and treatment collected across 4 transplant centers in Russia. No statistical analysis of the data was done yet, so the team will make the first and important step in mining new insights in this field.
+Graft versus host disease (GvHD) is a complication that might occur after an transplantation of bone marrow. GvHD is characerized by a high prevalence and probability of death. That is why the analysis of various factors impacting GvHD probability remains common problem in modern oncohematology. In the present project we propose to analyse a unique dataset containing data about GvHD diagnosis and treatment collected across 4 transplant centers in Russia. No statistical analysis of the data was done yet, so the team would make the first and important step in mining new insights in this field.
 
 ## Tasks
 
