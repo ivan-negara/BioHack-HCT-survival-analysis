@@ -44,7 +44,7 @@ TU_20230119_120304 - main diagnosis (indication for transplantation)
 3. ML-algorithms could be utilized in order to predict post-HCT survival and GvHD severity.
 
 ## Contributors
-Oleg Arnaut
-Ivan Negara
-Alisa Selezneva
+Oleg Arnaut, 
+Ivan Negara, 
+Alisa Selezneva, 
 Nikita Volkov
