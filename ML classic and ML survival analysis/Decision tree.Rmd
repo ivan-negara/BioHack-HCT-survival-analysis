@@ -1,0 +1,249 @@
+---
+title: "Descriptive tables and Decision tree for aGVHD for severity"
+output: html_document
+date: "2023-08-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(readxl)
+library(tidyverse)
+library(survival)
+library(survminer)
+library(gtsummary)
+library(rpart.plot)
+library(caret)
+library(kableExtra)
+library(compareGroups)
+```
+
+```{r Tema 7, warning=FALSE, include=FALSE}
+  #remove cols
+
+df_desc <- read_excel("DM_13.08.2023 (1).xlsx")
+df_desc <- df_desc %>%
+  select(-1,-2,-23,-24,-26)
+
+#rename vars
+df_desc <- df_desc %>% 
+  rename(aGVHD = `('Was GVHD diagnosis established?', 'Acute GVHD')`,
+                    cGvHD = `('Was GVHD diagnosis established?', 'Chronic GVHD')`,
+        aGVHD_date = `('GVHD diagnosis date', 'Acute GVHD')`,
+        cGVHD_date = `('GVHD diagnosis date', 'Chronic GVHD')`, 
+         aGVHD_grade = `Grade of acute GVHD`, 
+         cGVHD_grade = `Grade of chronic GVHD`,  
+         )
+#add id var
+df_desc <- rowid_to_column(df_desc, "id")
+
+#change HH in cgvhd dates
+df_desc[124, "cGVHD_date"] <- "15/09/2021"
+df_desc[299, "cGVHD_date"] <- "15/07/2021"
+df_desc[301, "cGVHD_date"] <- "15/06/2021"
+#transform dates
+df_desc <- df_desc %>%
+  mutate(Birth = dmy(Birth),
+         LCDTC = dmy(LCDTC),
+         DEATHDTC = dmy(DEATHDTC),
+         RELAPDTC = dmy(RELAPDTC),
+         TRDTC = dmy(TRDTC),
+         aGVHD_date = dmy(aGVHD_date),
+         cGVHD_date = dmy(cGVHD_date)
+         )
+#calculate dates
+df_desc <- df_desc %>%
+  mutate(
+FU_time = as.double(difftime(LCDTC, TRDTC)),
+Death_time = as.double(difftime(DEATHDTC, TRDTC)),
+Age_tr = (as.double(difftime( TRDTC, Birth, units = "days")))/365.25,
+Relapse_time = as.double(difftime(RELAPDTC, TRDTC)),
+aGVHD_time = as.double(difftime(aGVHD_date,TRDTC)),
+cGVHD_time = as.double(difftime(cGVHD_date, TRDTC))
+)
+
+#remove date vars
+df_desc <- df_desc %>%
+  select(-Birth, - LCDTC, -DEATHDTC, - RELAPDTC, - TRDTC, - aGVHD_date, -cGVHD_date)
+df_desc <- df_desc %>%
+mutate (FU_time = ifelse(is.na(FU_time), Death_time, FU_time))
+
+#Relapse
+df_desc <- df_desc %>%
+  mutate(compet_relapse = ifelse(RELAPYN == "no", FU_time, Relapse_time),
+         status_rel = ifelse(RELAPYN == "no", PTSTAT, RELAPYN)
+         )
+
+
+df <- df_desc %>% select(4:35) %>%
+  mutate(TRNUM = as.factor(TRNUM))
+res_all <- descrTable( ~ ., data = df,  method = NA, Q1 = 0,   Q3 = 1)
+```
+таблицы с описательной статистикой,
+```{r echo=FALSE, warning=FALSE}
+export2md(res_all)
+```
+
+```{r echo=FALSE, warning=FALSE}
+proph_grade <- descrTable(GVGD_proph ~ aGVHD + aGVHD_grade, data = df,  method = NA, Q1 = 0,   Q3 = 1)
+export2md(proph_grade, caption = c("Summary descriptive table by aGVHD and its' grade"))
+```
+
+```{r include=FALSE}
+prev <- read_excel("PREV_clear.xlsx")
+prev <- prev[2:344,]
+prev$SUBJID <- as.numeric(prev$SUBJID)
+prev <- prev %>%
+  select(SUBJID, ProphyClear)
+df_desc_prev <- left_join(df_desc, prev, by=c("SUBJID"))
+df_desc_prev <- df_desc_prev %>%
+  mutate(ProphyClear = case_when(ProphyClear == "Ptcy" | ProphyClear == "Ptcymono" ~ "Ptcy",
+                                 ProphyClear == "TCRab" | ProphyClear == "ATG" ~ "TCRab_ATG",
+                                 TRUE ~ ProphyClear))
+```
+
+```{r echo=FALSE, warning=FALSE}
+df_desc_prev <- df_desc_prev %>%
+  mutate(aGHVD_clear = if_else(aGVHD_grade %in% c(3,4), "severe", "no/mild"),
+         TRNUM = if_else(TRNUM > 1, "2 and more", "1"),
+         Age_tr = round(Age_tr, digits = 0))
+prophy_clear_desc <- descrTable(ProphyClear ~ aGHVD_clear, data = df_desc_prev,  method = NA, Q1 = 0,   Q3 = 1)
+export2md(prophy_clear_desc, caption = c("Severity of aGVHD according to GVHD prophylaxis"))
+```
+
+```{r include=FALSE}
+create_train_test <- function(data, size = 0.8, train = TRUE) {
+    n_row = nrow(data)
+    total_row = size * n_row
+    train_sample <- 1:total_row
+    if (train == TRUE) {
+        return (data[train_sample, ])
+    } else {
+        return (data[-train_sample, ])
+    }
+}
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pre_predict <- df_desc_prev %>%
+  select(Age_tr, Sex, TRNUM, TRTYPE, TRSOURCE, CONDTYPE, ProphyClear, `Main Diagnosis`, aGHVD_clear)
+pre_predict_train <- create_train_test(data = pre_predict, 0.8, train = TRUE)
+pre_predict_test <- create_train_test(data = pre_predict, 0.8, train = FALSE)
+
+```
+
+The decision tree for test dataset 
+```{r echo=FALSE}
+pre_predict_test <- as.data.frame(unclass(pre_predict_test),stringsAsFactors=TRUE)
+pre_predict_train <- as.data.frame(unclass(pre_predict_train),stringsAsFactors=TRUE)
+
+fit <- rpart(aGHVD_clear ~ ., 
+              data = pre_predict_test,
+              method = "class",
+              control = rpart.control(minsplit = 1,minbucket=1, cp=0))
+rpart.plot(fit)
+
+```
+
+```{r echo=FALSE}
+predicted_test <- predict(fit, pre_predict_test, type = "class")
+table_mat_test <- table(pre_predict_test$aGHVD_clear, predicted_test)
+cm_test <- confusionMatrix(table_mat_test, positive = "severe")
+
+draw_confusion_matrix <- function(cm) {
+
+  layout(matrix(c(1,1,2)))
+  par(mar=c(2,2,2,2))
+  plot(c(100, 345), c(300, 450), type = "n", xlab="", ylab="", xaxt='n', yaxt='n')
+  title('CONFUSION MATRIX', cex.main=2)
+
+  # create the matrix 
+  rect(150, 430, 240, 370, col='#3F97D0')
+  text(195, 435, 'no/mild', cex=1.2)
+  rect(250, 430, 340, 370, col='#F7AD50')
+  text(295, 435, 'severe', cex=1.2)
+  text(125, 370, 'Predicted', cex=1.3, srt=90, font=2)
+  text(245, 450, 'Actual', cex=1.3, font=2)
+  rect(150, 305, 240, 365, col='#F7AD50')
+  rect(250, 305, 340, 365, col='#3F97D0')
+  text(140, 400, 'no/mild ', cex=1.2, srt=90)
+  text(140, 335, 'severe', cex=1.2, srt=90)
+
+  # add in the cm results 
+  res <- as.numeric(cm$table)
+  text(195, 400, res[1], cex=1.6, font=2, col='white')
+  text(195, 335, res[2], cex=1.6, font=2, col='white')
+  text(295, 400, res[3], cex=1.6, font=2, col='white')
+  text(295, 335, res[4], cex=1.6, font=2, col='white')
+
+  # add in the specifics 
+  plot(c(100, 0), c(100, 0), type = "n", xlab="", ylab="", main = "DETAILS", xaxt='n', yaxt='n')
+  text(10, 85, names(cm$byClass[1]), cex=1.2, font=2)
+  text(10, 70, round(as.numeric(cm$byClass[1]), 3), cex=1.2)
+  text(30, 85, names(cm$byClass[2]), cex=1.2, font=2)
+  text(30, 70, round(as.numeric(cm$byClass[2]), 3), cex=1.2)
+  text(50, 85, names(cm$byClass[5]), cex=1.2, font=2)
+  text(50, 70, round(as.numeric(cm$byClass[5]), 3), cex=1.2)
+  text(70, 85, names(cm$byClass[6]), cex=1.2, font=2)
+  text(70, 70, round(as.numeric(cm$byClass[6]), 3), cex=1.2)
+  text(90, 85, names(cm$byClass[7]), cex=1.2, font=2)
+  text(90, 70, round(as.numeric(cm$byClass[7]), 3), cex=1.2)
+
+  # add in the accuracy information 
+  text(30, 35, names(cm$overall[1]), cex=1.5, font=2)
+  text(30, 20, round(as.numeric(cm$overall[1]), 3), cex=1.4)
+  text(70, 35, names(cm$overall[2]), cex=1.5, font=2)
+  text(70, 20, round(as.numeric(cm$overall[2]), 3), cex=1.4)
+}  
+
+draw_confusion_matrix(cm_test)
+```
+
+```{r echo=FALSE}
+fit_train <- rpart(aGHVD_clear ~ ., 
+              data = pre_predict_train,
+              method = "class",
+              control = rpart.control(minsplit = 1,minbucket=1, cp=0))
+
+predicted_train <- predict(fit, pre_predict_train, type = "class")
+table_mat_train <- table(pre_predict_train$aGHVD_clear, predicted_train)
+accuracy_Test_train <- sum(diag(table_mat_train)) / sum(table_mat_train)
+cm_train <- confusionMatrix(table_mat_train, positive = "severe")
+draw_confusion_matrix(cm_train)
+```
+
+
+After increasing depth of the decision tree to 10
+```{r echo=FALSE}
+control <- rpart.control(minsplit = 5,
+    minbucket = round(5 / 3),
+    maxdepth = 10,
+    cp = 0)
+
+
+tune_fit <- rpart(aGHVD_clear~., data = pre_predict_test, method = 'class', control = control)
+predicted_tuned <- predict(tune_fit, pre_predict_test, type = 'class')
+table_mat_tuned <- table(pre_predict_test$aGHVD_clear, predicted_tuned)
+cm_test_tuned <- confusionMatrix(table_mat_tuned, positive = "severe")
+draw_confusion_matrix(cm_test_tuned)
+```
+
+
+```{r echo=FALSE}
+control <- rpart.control(minsplit = 5,
+    minbucket = round(5 / 3),
+    maxdepth = 10,
+    cp = 0)
+
+tune_fit_trained <- rpart(aGHVD_clear~., data = pre_predict_train, 
+                  method = 'class', control = control)
+predicted_tuned_trained <- predict(tune_fit_trained, pre_predict_train, type = 'class')
+table_mat_tuned_trained <- table(pre_predict_train$aGHVD_clear, predicted_tuned_trained)
+cm_train_tuned <- confusionMatrix(table_mat_tuned_trained, positive = "severe")
+draw_confusion_matrix(cm_train_tuned)
+```
+
+
